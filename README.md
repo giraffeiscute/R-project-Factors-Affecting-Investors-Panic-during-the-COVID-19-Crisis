@@ -11,9 +11,9 @@ English version underneath
 ## 研究亮點
 1. 綜合統計分析與機器學習技術，雙重驗證疫情對市場情緒的影響
 
-2. 使用Lasso 與 Ridge regression 模型提供預測角度，並考慮特徵選擇與過擬合問題
+2. 使用 Lasso 與 Ridge regression 模型提供預測角度，並考慮特徵選擇與過擬合問題
 
-3. 應用PCA 提供降維分析結果，協助萃取重要變數與潛在解釋因子
+3. 應用 PCA 提供降維分析結果，協助萃取重要變數與潛在解釋因子
 
 ## 機器學習應用
 ### Lasso 與 Ridge Regression 模型比較
