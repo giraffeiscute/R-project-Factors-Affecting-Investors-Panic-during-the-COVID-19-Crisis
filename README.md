@@ -65,11 +65,11 @@ Motivation: The COVID-19 pandemic severely impacted the global economy and finan
 Objective: To analyze how the release of pandemic-related news influenced the VIX, especially surrounding key events such as the WHO's declaration of a global pandemic.
 
 ## Research Highlights
-Combined use of statistical analysis and machine learning techniques to validate the impact of the pandemic on investor sentiment.
+1. Combined use of statistical analysis and machine learning techniques to validate the impact of the pandemic on investor sentiment.
 
-Applied Lasso and Ridge Regression models to predict VIX levels while addressing feature selection and overfitting concerns.
+2. Applied Lasso and Ridge Regression models to predict VIX levels while addressing feature selection and overfitting concerns.
 
-Used Principal Component Analysis (PCA) to perform dimensionality reduction, extracting key variables and uncovering latent explanatory factors.
+3. Used Principal Component Analysis (PCA) to perform dimensionality reduction, extracting key variables and uncovering latent explanatory factors.
 
 ## Machine Learning Applications
 ### Comparison of Lasso and Ridge Regression Models
