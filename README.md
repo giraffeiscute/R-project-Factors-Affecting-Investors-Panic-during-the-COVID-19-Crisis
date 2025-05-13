@@ -40,7 +40,7 @@
 3. 整理疫情初期與後期 VIX 水準變化趨勢
 
 ## 觀看完整報告與實驗結果
-使用google或任意瀏覽器開啟檔案 楊致遠__林羽霈_新冠疫情下投資人的恐慌指標(VIX).html 即可觀看完整實驗結果圖以及實驗報告
+使用google或任意瀏覽器開啟檔案 [楊致遠__林羽霈_新冠疫情下投資人的恐慌指標(VIX).html](https://github.com/giraffeiscute/R-project-Factors-Affecting-Investors-Panic-during-the-COVID-19-Crisis/blob/main/%E6%A5%8A%E8%87%B4%E9%81%A0__%E6%9E%97%E7%BE%BD%E9%9C%88_%E6%96%B0%E5%86%A0%E7%96%AB%E6%83%85%E4%B8%8B%E6%8A%95%E8%B3%87%E4%BA%BA%E7%9A%84%E6%81%90%E6%85%8C%E6%8C%87%E6%A8%99(VIX).html) 即可觀看完整實驗結果圖以及實驗報告
 
 
 ## 參考資料
