@@ -1,0 +1,390 @@
+---
+title: "final project"
+author: '108071044'
+date: '2022-06-18'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+新冠疫情下投資人的恐慌指標 (VIX)
+
+
+## 一、摘要
+
+
+	此篇專題將研究哪些新冠肺炎相關之數據(如:美國確診死亡率、供應鏈國家確診數......)與投資人的恐慌指數最為關聯，而新冠肺炎的數據是否能成為預測恐慌指數的依據。
+	
+	
+貳、研究動機
+許多媒體和投資人將2020年美國股市股災歸咎於新冠肺炎的爆發，2020年時更有許多家媒體表達對於未來美股股價感到擔憂和恐慌，而此研究將驗證是否新冠肺炎的爆發和市場對於美股股價感到擔憂和恐慌相關。
+在鍾老師的衍訂課程中有提到投資人對於未來股價的恐慌程度可以透過 VIX 指數的高低來得知，當 VIX 值很高時，代表投資人認為未來 S&P500 股價指數變動幅度會變劇烈，因此我們選擇使用 VIX 指數做為恐慌程度的替代變數。
+而關於新冠肺炎相關的數據又有非常多方面和種類，那些資料是適合做為評斷依據，以及如何優化回歸也是這篇專題所要探討的對象。
+
+
+參、研究流程
+1. 蒐集多國家(中國、美國)從2020/02/03開始至今的確診人數、死亡率、死亡人數、疫苗量能、政府政策.病毒擴散率數據 
+資料來源: https://ourworldindata.org/covid-cases
+```{r}
+library(tidyverse)
+summary_data <- read.csv('owid-covid-data.csv') #得到有關 covid 的各個國家各項數據
+vix <- read.csv('vix.csv')#在Yahoo finance 中取得 VIX 資料
+
+summary_data <- summary_data %>% filter(date %in% vix$Date) #挑出美股有開市的日期
+summary_data %>% glimpse
+```
+
+# 資料前處理
+在做資料前處理時我們發現了累計資料的非定態問題，因為累計資料並不會下降，導致只要是累計資料都會有正相關的性質，而這些並不符合事實，下面為死亡人數和接種疫苗人數的舉例
+在累計資料下，死亡人數和接種疫苗人數相關係數約為0.95
+```{r}
+library(ggplot2)
+library(patchwork)
+usa_summary_data <- summary_data %>% filter(location == 'United States') 
+
+Cor <- cor(usa_summary_data$total_deaths[220:581],usa_summary_data$total_vaccinations[220:581])
+cat('累計資料相關係數為',Cor)
+usa_total_deaths <- usa_summary_data %>% ggplot(aes(x = 1:581)) + geom_line(aes(y = total_deaths),color = "blue") + 
+                                                                labs(x = "index") + theme_bw()
+usa_total_vaccinations <- usa_summary_data %>% ggplot(aes(x = 1:581)) + geom_line(aes(y = total_vaccinations),color = "red")+ 
+  labs(x = "index") + theme_bw()
+(usa_total_deaths|usa_total_vaccinations)  
+```
+
+
+在處理非定態資料時，有個常用處理方式就是差分，也就是下一項減去前一項的值，而在此例子中即為新增死亡和新增疫苗注射人數
+```{r}
+Cor <- cor(usa_summary_data$new_deaths[220:581],usa_summary_data$new_vaccinations[220:581])
+cat('差分處理後的相關係數為',Cor)
+usa_new_deaths <- usa_summary_data %>% ggplot(aes(x = 1:581)) + geom_line(aes(y = new_deaths),color = "black") + 
+  labs(x = "index")+
+  geom_vline(xintercept = 250,size = 1,color ="red")+
+  geom_vline(xintercept = 350,size = 1,color ="red")+
+  theme_bw()
+usa_new_vaccination <- usa_summary_data %>% ggplot(aes(x = 1:581)) + geom_line(aes(y = new_vaccinations),color = "black") + 
+  labs(x = "index")+ 
+  geom_vline(xintercept = 250,size = 1,color ="red")+
+  geom_vline(xintercept = 350,size = 1,color ="red")+ 
+  theme_bw()
+(usa_new_deaths|usa_new_vaccination)
+
+```
+處理出來的資料相關係數為負，與累計資料相去甚遠，在趨勢圖上也看得出差異
+
+
+因此我們將所有total(非定態)、不同單位但是是相同數據(完全共線性)、NA 數過多的資料去除(參考價值低)
+```{r}
+#pick the data with no replicated and the number of NAN is acceptable
+world_summary_cleaned <- summary_data %>% transmute(location,
+                                                    continent,
+                                                    date,
+                                                    new_cases_smoothed,
+                                                    new_deaths_smoothed,
+                                                    reproduction_rate,  
+                                                    new_tests_smoothed,
+                                                    positive_rate,
+                                                    tests_per_case,
+                                                    people_vaccinated,
+                                                    people_fully_vaccinated,
+                                                    new_vaccinations_smoothed,
+                                                    total_deaths,
+                                                    total_cases,
+                                                    stringency_index,
+                                                    population,
+                                                    population_density,
+)#這些是我們挑出可使用的資料，一個國家共17個變數
+```
+
+在許多報導中都有提到政策對於美國股市的影響，因此我們把和新冠肺炎相關的政策當作dummy variable
+```{r}
+time_line <- function(start,end,data){
+  cut(as.Date(data$date),c(as.Date('2020-01-01'),as.Date(start),as.Date(end),as.Date('2022-07-05')),c(0,1,0))
+}
+c_time_line <- function(start1,end1,start2,end2,data){
+  cut(as.Date(data$date),c(as.Date('2020-01-01'),as.Date(start1),as.Date(end1),as.Date(start2),as.Date(end2),as.Date('2022-07-05')),c(0,1,0,1,0))
+}
+
+#input statistic and policy
+world_summary_cleaned_policy <- world_summary_cleaned %>% mutate(death_rate = total_deaths/total_cases,
+                                                           new_york_lockdown = time_line(start = '2020-03-22', end = '2020-05-15', world_summary_cleaned),
+                                                           California_lockdown = time_line(start = '2020-03-19', end = '2020-05-17', world_summary_cleaned),
+                                                           China_factory_shutdown = c_time_line(start1 = '2020-01-18', end1 = '2020-02-14', start2 = '2022-03-28',end2 = '2022-06-01', world_summary_cleaned),
+                                                           federal_rate_cut = time_line(start = '2020-03-15', end = '2020-05-07', world_summary_cleaned))
+head(world_summary_cleaned_policy[40:50,18:22])#加入政策後的部分資料
+```
+此次取得資料的NA值我們把它分成2種
+
+1.
+covid相關數據(如疫苗注射人數)相較於疫情爆發晚，而導致在疫情爆發初期此數據有NA值的出現
+這些NA值我們填入0
+```{r}
+world_summary_cleaned_policy[is.na(world_summary_cleaned_policy)] <- 0
+library(rio)
+#save our cleaned data as "world_summary_cleaned_policy.csv".
+export(world_summary_cleaned_policy, "world_summary_cleaned_policy.csv")
+export(vix, "vix.csv")
+
+```
+
+
+2.
+其他NA值
+我們所取得的covid資料庫其實相當完整，如果有缺漏值此資料以smooth的方式補齊NA值(在離散的資料中畫出曲線再用這個曲線回推缺漏值為何)，而這個步驟在取得資料的網站有提供
+
+
+
+##  以Lasso & Ridge模型預測 VIX 走向
+# 美國資料與國際政策
+在線性回歸模型中，為了最佳化目標函式(最小化誤差平方和)，資料需符合許多假設，才能得到不偏回歸係數，使得模型變異量最低。可現實中數據非常可能有多個特徵變數，使得模型假設不成立而產生過度配適(overfit)問題，這時則需透過正規化法(regularized regression)來控制回歸係數，藉此降低模型變異以及樣本外誤差，而在此研究中我們使用Lasso & Ridge法控制回歸係數。
+
+首先，我們先將資料整理成Lasso & Ridge模型使用的格式(目前只有使用美國資料與國際政策，下方章節會加入他國資料)
+```{r}
+target_contry <- function(data, place){
+  subset(data,data$location == place)
+}
+
+world_summary_ <- read.csv('world_summary_cleaned_policy.csv')
+world_summary <- world_summary_[,-c(13,14,16,17)] #delete the data with total and population
+vix <- read.csv('vix.csv')
+
+america_summary_data <- target_contry(data = world_summary, place = 'United States')
+america_summary_data <- america_summary_data %>% mutate(log_vix_adj_close = log(vix$Adj.Close),.before= "location")
+
+#pick the numeric variable
+covid_variable <- world_summary %>% select(where(~is.numeric(.x)))
+america_covid_variable <- america_summary_data %>% select(where(~is.numeric(.x)))
+
+```
+
+# Tuning
+在Lasso模型中最重要的超參數（hyperparameters）即為懲罰係數(lambda)，懲罰係數將會限制回歸係數的大小，除非該變數可以使誤差平方和(SSE)降低對應水準，該特徵係數才會上升。
+而Tuning大致分兩種方法
+1.對應最小MSE的λ
+2.對應最小MSE一個標準差內的最大λ
+
+而何種辦法對於模型來說較佳我們會在下方呈現
+而此次使用的套件為glmnet挑選最佳lambda和訓練Lasso模型 & Ridge模型
+我們這次使用Split-Sample方式分出訓練樣本(train set)和測試樣本(test set)
+```{r}
+set.seed(22)
+train.index = sample(x=1:nrow(america_covid_variable),
+                     size=ceiling(0.8*nrow(america_covid_variable)))
+
+train = america_covid_variable[train.index, ]
+test = america_covid_variable[-train.index, ]
+```
+
+我們先看各種Lambda對於變數係數的影響程度
+```{r}
+library(glmnet)
+ridge = glmnet(x = as.matrix(train[, -1]), 
+               y = train[, 1], 
+               alpha = 0,
+               family = "gaussian")
+
+lasso = glmnet(x = as.matrix(train[, -1]), 
+               y = train[, 1], 
+               alpha = 1,
+               family = "gaussian")
+
+par(mfcol = c(1, 2))
+plot(lasso, xvar='lambda', main="Lasso")
+plot(ridge, xvar='lambda', main="Ridge")
+```
+我們可以發現大約在log.lambda為-6時變數係數會降低許多，log.lambda為-3時只剩下3個變數被保留在模型中
+
+為了找出最適的λ(模型結果MSE最小)，我們會需要利用cross-validation來協助。我們可以透過cv.glmnet()函數來執行k-fold cross validation，預設k=10。
+```{r}
+#picking lambda lasso (by min MSE)
+cv.lasso = cv.glmnet(x = as.matrix(train[, -1]), 
+                     y = train[, 1], 
+                     alpha = 1,  # lasso
+                     family = "gaussian")
+
+par(mfcol = c(1, 2))
+plot(cv.lasso)
+best.lambda_lasso = cv.lasso$lambda.1se
+best.lambda_lasso
+
+#picking lambda ridge (by min MSE)
+cv.ridge = cv.glmnet(x = as.matrix(train[, -1]), 
+                     y = train[, 1], 
+                     alpha = 0,  # ridge
+                     family = "gaussian")
+
+plot(cv.ridge)
+best.lambda_ridge = cv.ridge$lambda.min
+best.lambda_ridge
+```
+在lasso模型中，我們挑選最佳的lambda為一個標準差內的最大λ(λ=0.005040327) 因為一個標準差內的最大λ的MSE與最低MSE相差很少，因此我們選擇一個標準差內的最大λ以減少過度配適(overfit)問題
+
+對於ridge模型來說，我們挑選最佳的lambda為MSE最低的λ(λ=0.01729069)，使用一個標準差內的最大λ並不會減少大量變數的係數，如下如所示
+
+```{r}
+best.lambda_ridge = cv.ridge$lambda.min
+best.lambda_ridge
+par(mfcol = c(1, 2))
+plot(lasso, xvar='lambda', main="Lasso")
+abline(v=log(best.lambda_lasso), col="blue", lty=5.5 )
+plot(ridge, xvar='lambda', main="Ridge")
+abline(v=log(best.lambda_ridge), col="blue", lty=5.5 )
+```
+我們把得到的lambda帶回lasso模型和ridge中
+沒有變數被剔除，但是當我們細看其中的lasso模型保留下來的係數
+
+```{r}
+coef(cv.lasso, s = "lambda.1se")
+select.ind_lasso <-  which(abs(coef(cv.lasso, s = "lambda.1se")) !=0)
+select.ind_lasso <-  select.ind_lasso[-1]  # ignore interval
+select.varialbes_lasso = colnames(train)[select.ind_lasso]
+select.varialbes_lasso
+```
+其模型的係數已並非原本的回歸模型係數，是已經經過lambda的優化的係數。
+
+最後，我們將評估模型的成效
+```{r}
+#evaluate
+ridge.test = predict(ridge, 
+                     s = best.lambda_ridge, 
+                     newx = as.matrix(test[, -1]))
+SSE_ridge <- mean((exp(test$log_vix_adj_close) - exp(ridge.test))^2)
+SST <- mean((exp(test$log_vix_adj_close) - exp(mean(test$log_vix_adj_close)))^2)
+R_square_ridge <- 1 - SSE_ridge/SST
+cat('Ridge R square',R_square_ridge)
+
+lasso.test = predict(lasso, 
+                     s = best.lambda_lasso, 
+                     newx = as.matrix(test[, -1]))
+SSE_lasso <- mean((exp(test$log_vix_adj_close) - exp(lasso.test))^2)
+SST <- mean((exp(test$log_vix_adj_close) - exp(mean(test$log_vix_adj_close)))^2)
+R_square_lasso <- 1 - SSE_lasso/SST
+cat('Lasso R square',R_square_lasso)
+```
+Lasso模型R平方為0.7737381
+Ridge模型R平方為0.6973436
+
+## 加入中國新冠肺炎資料
+因為中國為美國進口大國，也就是重要供應鏈的一環
+所以我們將加入中國新冠肺炎資料以提升模型準確度
+其手法與上方相同
+```{r}
+china_summary_data <- target_contry(data = world_summary, place = 'China')
+china_summary_data <- china_summary_data %>% mutate(log_vix_adj_close = log(vix$Adj.Close),
+                                                    .before= "location")
+china_covid_variable <- china_summary_data %>% select(where(~is.numeric(.x)))
+china_usa_covid_variable <- america_covid_variable %>% mutate(china_new_cases_smoothed = china_covid_variable$new_cases_smoothed,
+                                                              china_new_deaths_smoothed = china_covid_variable$new_deaths_smoothed,
+                                                              china_reproduction_rate = china_covid_variable$reproduction_rate,
+                                                              china_new_tests_smoothed = china_covid_variable$new_tests_smoothed,
+                                                              china_positive_rate = china_covid_variable$positive_rate,
+                                                              china_tests_per_case = china_covid_variable$tests_per_case,
+                                                              china_people_vaccinated = china_covid_variable$people_vaccinated,
+                                                              china_people_fully_vaccinated = china_covid_variable$people_fully_vaccinated,
+                                                              china_new_vaccinations_smoothed = china_covid_variable$new_vaccinations_smoothed,
+                                                              china_stringency_index = china_covid_variable$stringency_index,
+                                                              china_death_rate = china_covid_variable$death_rate
+                                                          )
+library(glmnet)
+
+set.seed(22)
+train.index = sample(x=1:nrow(china_usa_covid_variable),
+                     size=ceiling(0.8*nrow(china_usa_covid_variable)))
+
+train = china_usa_covid_variable[train.index, ]
+test = china_usa_covid_variable[-train.index, ]
+
+ridge = glmnet(x = as.matrix(train[, -1]), 
+               y = train[, 1], 
+               alpha = 0,
+               family = "gaussian")
+
+lasso = glmnet(x = as.matrix(train[, -1]), 
+               y = train[, 1], 
+               alpha = 1,
+               family = "gaussian")
+
+par(mfcol = c(1, 2))
+plot(lasso, xvar='lambda', main="Lasso")
+plot(ridge, xvar='lambda', main="Ridge")
+
+```
+```{r}
+#picking lambda lasso (by min MSE)
+cv.lasso = cv.glmnet(x = as.matrix(train[, -1]), 
+                     y = train[, 1], 
+                     alpha = 1,  # lasso
+                     family = "gaussian")
+
+best.lambda_lasso = cv.lasso$lambda.1se
+best.lambda_lasso
+
+```
+```{r}
+#picking lambda ridge (by min MSE)
+cv.ridge = cv.glmnet(x = as.matrix(train[, -1]), 
+                     y = train[, 1], 
+                     alpha = 0,  # ridge
+                     family = "gaussian")
+
+best.lambda_ridge = cv.ridge$lambda.1se
+best.lambda_ridge
+```
+```{r}
+par(mfcol = c(1, 2))
+plot(cv.lasso)
+plot(cv.ridge)
+```
+
+
+在lasso模型中，我們挑選最佳的lambda為一個標準差內的最大λ(λ=0.004592558) 因為一個標準差內的最大λ的MSE與最低MSE相差很少，因此我們選擇一個標準差內的最大λ以減少過度配適(overfit)問題
+在lasso模型中，我們挑選最佳的lambda為一個標準差內的最大λ(λ=0.05795151)，而原因與lasso模型相同
+
+```{r}
+par(mfcol = c(1, 2))
+plot(lasso, xvar='lambda', main="Lasso")
+abline(v=log(best.lambda_lasso), col="blue", lty=5.5 )
+plot(ridge, xvar='lambda', main="Ridge")
+abline(v=log(best.lambda_ridge), col="blue", lty=5.5 )
+```
+
+我們來看我們挑選出的變數剩下那些，而係數又為多少
+```{r}
+coef(cv.lasso, s = "lambda.1se")
+select.ind_lasso <-  which(abs(coef(cv.lasso, s = "lambda.1se")) != 0)
+select.ind_lasso <-  select.ind_lasso[-1]  # ignore interval
+select.varialbes_lasso = colnames(train)[select.ind_lasso]
+select.varialbes_lasso
+```
+由此可知在挑選出來的18個預測美股恐慌程度的變數中只有8個變數在美國本土發生，由此可知中國新冠肺炎的政策(工廠停工...)和數據(死亡率...)占了超過一半的變數，由此可知中國疫情嚴重程度影響美國股市相當嚴重。
+
+現在我們來評估模型成效
+```{r}
+#evaluate
+ridge.test = predict(ridge, 
+                     s = best.lambda_ridge, 
+                     newx = as.matrix(test[, -1]))
+SSE_ridge <- mean((exp(test$log_vix_adj_close) - exp(ridge.test))^2)
+SST <- mean((exp(test$log_vix_adj_close) - exp(mean(test$log_vix_adj_close)))^2)
+R_square_ridge <- 1 - SSE_ridge/SST
+cat('Ridge R square',R_square_ridge)
+
+lasso.test = predict(lasso, 
+                     s = best.lambda_lasso, 
+                     newx = as.matrix(test[, -1]))
+SSE_lasso <- mean((exp(test$log_vix_adj_close) - exp(lasso.test))^2)
+SST <- mean((exp(test$log_vix_adj_close) - exp(mean(test$log_vix_adj_close)))^2)
+R_square_lasso <- 1 - SSE_lasso/SST
+cat('Lasso R square',R_square_lasso)
+
+```
+Lasso模型R平方為0.7645679
+Ridge模型R平方為0.8048402
+
+
+
+
+
+

@@ -1,0 +1,792 @@
+---
+title: "新冠疫情下投資人的恐慌指標 (VIX)"
+author: '108071044楊致遠、108071027林羽霈'
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **一、摘要**
+
+    此篇專題將研究哪些新冠肺炎相關之數據(如:美國確診死亡率、供應鏈國家確診數......)與投資人的恐慌指數最為關聯，而新冠肺炎的數據是否能成為預測恐慌指數的依據。
+
+## **貳、研究動機**
+
+許多媒體和投資人將2020年美國股市股災歸咎於新冠肺炎的爆發，2020年時更有許多家媒體表達對於未來美股股價感到擔憂和恐慌，而此研究將驗證**是否新冠肺炎的爆發和市場對於美股股價感到擔憂和恐慌相關**。
+
+在鍾老師的衍訂課程中有提到投資人對於未來股價的恐慌程度可以透過 **VIX 指數**的高低來得知，當 VIX 值很高時，代表投資人認為未來 S&P500 股價指數變動幅度會變劇烈，因此我們選擇使用 VIX 指數做為恐慌程度的替代變數。 而關於新冠肺炎相關的數據又有非常多方面和種類，那些資料是適合做為評斷依據，以及如何優化回歸也是這篇專題所要探討的對象。
+
+## **參、研究流程**
+
+## **3.1. 蒐集資料**
+
+蒐集多國家(中國、美國)從2020/02/03開始至今的確診人數、死亡率、死亡人數、疫苗量能、政府政策.病毒擴散率數據 資料來源: <https://ourworldindata.org/covid-cases>
+
+```{r warning=FALSE}
+suppressMessages(library(tidyverse))
+summary_data <- read.csv('owid-covid-data.csv') #得到有關 covid 的各個國家各項數據
+vix <- read.csv('vix.csv')#在Yahoo finance 中取得 VIX 資料
+```
+
+```{r class.source = 'fold-show', warning=FALSE}
+summary_data <- summary_data %>% filter(date %in% vix$Date) #挑出美股有開市的日期
+```
+
+## **3.2. 資料前處理**
+
+在做資料前處理時我們發現了累計資料的非定態問題，因為累計資料並不會下降，導致只要是累計資料都會有正相關的性質，而這些並不符合事實，下面為死亡人數和接種疫苗人數的舉例。在累計資料下，死亡人數和接種疫苗人數相關係數約為0.95
+
+```{r}
+suppressMessages(library(ggplot2))
+suppressMessages(library(patchwork))
+usa_summary_data <- summary_data %>% filter(location == 'United States') 
+Cor <- cor(usa_summary_data$total_deaths[220:581],usa_summary_data$total_vaccinations[220:581])
+cat('累計資料相關係數為',Cor)
+```
+
+```{r class.source = 'fold-show', warning=FALSE}
+usa_total_deaths <- usa_summary_data %>% ggplot(aes(x = 1:581)) + geom_line(aes(y = total_deaths),color = "blue") + labs(x = "index") + theme_bw()
+usa_total_vaccinations <- usa_summary_data %>% ggplot(aes(x = 1:581)) + geom_line(aes(y = total_vaccinations),color = "red")+ 
+  labs(x = "index") + theme_bw()
+(usa_total_deaths|usa_total_vaccinations)
+```
+
+在處理非定態資料時，有個常用處理方式就是[差分]{.underline}，也就是下一項減去前一項的值，而在此例子中即為新增死亡和新增疫苗注射人數
+
+```{r warning=FALSE}
+Cor <- cor(usa_summary_data$new_deaths[220:581],usa_summary_data$new_vaccinations[220:581])
+cat('差分處理後的相關係數為',Cor)
+usa_new_deaths <- usa_summary_data %>% ggplot(aes(x = 1:581)) + geom_line(aes(y = new_deaths),color = "black") + 
+  labs(x = "index")+
+  geom_vline(xintercept = 250,size = 1,color ="red")+
+  geom_vline(xintercept = 350,size = 1,color ="red")+
+  theme_bw()
+usa_new_vaccination <- usa_summary_data %>% ggplot(aes(x = 1:581)) + geom_line(aes(y = new_vaccinations),color = "black") + 
+  labs(x = "index")+ 
+  geom_vline(xintercept = 250,size = 1,color ="red")+
+  geom_vline(xintercept = 350,size = 1,color ="red")+ 
+  theme_bw()
+(usa_new_deaths|usa_new_vaccination)
+```
+
+處理出來的資料**相關係數為負**，與累計資料相去甚遠，在趨勢圖上也看得出差異
+
+因此我們將所有[total(非定態)]{.underline}、[不同單位]{.underline}但是是相同數據(完全共線性)、[NA]{.underline} 數過多的資料去除(參考價值低)
+
+```{r warning=FALSE}
+#pick the data with no replicated and the number of NAN is acceptable
+world_summary_cleaned <- summary_data %>% transmute(location,
+                                                    continent,
+                                                    date,
+                                                    new_cases_smoothed,
+                                                    new_deaths_smoothed,
+                                                    reproduction_rate,  
+                                                    new_tests_smoothed,
+                                                    positive_rate,
+                                                    tests_per_case,
+                                                    people_vaccinated,
+                                                    people_fully_vaccinated,
+                                                    new_vaccinations_smoothed,
+                                                    total_deaths,
+                                                    total_cases,
+                                                    stringency_index,
+                                                    population,
+                                                    population_density,
+)#這些是我們挑出可使用的資料，一個國家共17個變數
+```
+
+在許多報導中都有提到政策對於美國股市的影響，因此我們把和新冠肺炎相關的政策當作dummy variable
+
+```{r warning=FALSE}
+time_line <- function(start,end,data){
+  cut(as.Date(data$date),c(as.Date('2020-01-01'),as.Date(start),as.Date(end),as.Date('2022-07-05')),c(0,1,0))
+}
+c_time_line <- function(start1,end1,start2,end2,data){
+  cut(as.Date(data$date),c(as.Date('2020-01-01'),as.Date(start1),as.Date(end1),as.Date(start2),as.Date(end2),as.Date('2022-07-05')),c(0,1,0,1,0))
+}
+
+#input statistic and policy
+world_summary_cleaned_policy <- world_summary_cleaned %>% mutate(death_rate = total_deaths/total_cases,
+                                                           new_york_lockdown = time_line(start = '2020-03-22', end = '2020-05-15', world_summary_cleaned),
+                                                           California_lockdown = time_line(start = '2020-03-19', end = '2020-05-17', world_summary_cleaned),
+                                                           China_factory_shutdown = c_time_line(start1 = '2020-01-18', end1 = '2020-02-14', start2 = '2022-03-28',end2 = '2022-06-01', world_summary_cleaned),
+                                                           federal_rate_cut = time_line(start = '2020-03-15', end = '2020-05-07', world_summary_cleaned))
+head(world_summary_cleaned_policy[40:50,18:22])#加入政策後的部分資料
+
+```
+
+此次取得資料的NA值我們把它分成2種如下：
+
+1.  Covid 相關數據(如疫苗注射人數)相較於疫情爆發晚，而導致在疫情爆發初期此數據有NA值的出現。
+
+    這些NA值我們填入0
+
+```{r class.source = 'fold-show', warning=FALSE}
+world_summary_cleaned_policy[is.na(world_summary_cleaned_policy)] <- 0
+```
+
+2.  其他NA值：我們所取得的Covid 資料庫其實相當完整，如果有缺漏值，此資料以smooth的方式補齊NA值(在離散的資料中畫出曲線再用這個曲線回推缺漏值為何)，而這個步驟在取得資料的網站有提供
+
+```{r warning=FALSE}
+#輸出清理好且加入政策的資料
+suppressMessages(library(rio))
+#save our cleaned data as "world_summary_cleaned_policy.csv".
+```
+
+```{r class.source = 'fold-show', warning=FALSE}
+export(world_summary_cleaned_policy, "world_summary_cleaned_policy.csv")
+export(vix, "vix.csv")
+```
+
+## **3.3. 回歸分析**
+
+## **3.3.1 預測 ：使用Lasso / Ridge regression**
+
+在線性回歸模型中，為了最佳化目標函式(最小化誤差平方和)，資料需符合許多假設，才能得到不偏回歸係數，使得模型變異量最低。可現實中數據非常可能有多個特徵變數，使得模型假設不成立而產生過度配適(overfit)問題，這時則需透過正規化法(regularized regression)來控制回歸係數，藉此降低模型變異以及樣本外誤差，而在此研究中我們使用Lasso & Ridge法控制回歸係數。
+
+**以Lasso & Ridge模型預測 VIX 走向**
+
+### ***分析一 \< 美國資料與國際政策 \>*** {.tabset .tabset-pills}
+
+#### **Step 1：整理資料**
+
+先將資料整理成Lasso & Ridge模型使用的格式(目前只有使用美國資料與國際政策，下方章節會加入他國資料)
+
+```{r warning=FALSE}
+target_contry <- function(data, place){
+  subset(data,data$location == place)
+}
+
+world_summary_ <- read.csv('world_summary_cleaned_policy.csv')
+world_summary <- world_summary_[,-c(13,14,16,17)] #delete the data with total and population
+vix <- read.csv('vix.csv')
+
+america_summary_data <- target_contry(data = world_summary, place = 'United States')
+america_summary_data <- america_summary_data %>% mutate(log_vix_adj_close = log(vix$Adj.Close),.before= "location")
+
+```
+
+```{r class.source = 'fold-show', warning=FALSE}
+#pick the numeric variable
+covid_variable <- world_summary %>% select(where(~is.numeric(.x)))
+america_covid_variable <- america_summary_data %>% select(where(~is.numeric(.x)))
+```
+
+#### **Step2：Tuning**
+
+在Lasso模型中最重要的超參數（hyperparameters）即為懲罰係數(lambda)，懲罰係數將會限制回歸係數的大小，除非該變數可以使誤差平方和(SSE)降低對應水準，該特徵係數才會上升。
+
+而Tuning大致分為兩種方法：
+
+1.對應最小MSE的λ
+
+2.對應最小MSE一個標準差內的最大λ
+
+而何種方法對於模型來說較佳我們會在下方呈現
+
+此次使用的套件為 [glmnet 挑選最佳 lambda]{.underline} 和 [訓練 Lasso模型 & Ridge模型]{.underline}
+
+我們這次使用Split-Sample方式分出訓練樣本(train set) 和 測試樣本(test set)
+
+```{r warning=FALSE}
+set.seed(22)
+train.index = sample(x=1:nrow(america_covid_variable),
+                     size=ceiling(0.8*nrow(america_covid_variable)))
+```
+
+```{r class.source = 'fold-show', warning=FALSE}
+train = america_covid_variable[train.index, ]
+test = america_covid_variable[-train.index, ]
+```
+
+我們先看各種Lambda對於變數係數的影響程度
+
+```{r warning=FALSE}
+suppressMessages(library(glmnet))
+ridge = glmnet(x = as.matrix(train[, -1]), 
+               y = train[, 1], 
+               alpha = 0,
+               family = "gaussian")
+
+lasso = glmnet(x = as.matrix(train[, -1]), 
+               y = train[, 1], 
+               alpha = 1,
+               family = "gaussian")
+
+par(mfcol = c(1, 2))
+plot(lasso, xvar='lambda', main="Lasso")
+plot(ridge, xvar='lambda', main="Ridge")
+```
+
+我們可以發現大約在log.lambda為 -6 時變數係數會降低許多，log.lambda 為-3 時只剩下3個變數被保留在模型中
+
+為了找出最適的λ(模型結果MSE最小)，我們會需要利用cross-validation來協助。我們可以透過cv.glmnet()函數來執行k-fold cross validation，預設k=10。
+
+```{r warning=FALSE}
+#picking lambda lasso (by min MSE)
+cv.lasso = cv.glmnet(x = as.matrix(train[, -1]), 
+                     y = train[, 1], 
+                     alpha = 1,  # lasso
+                     family = "gaussian")
+
+par(mfcol = c(1, 2))
+plot(cv.lasso)
+best.lambda_lasso = cv.lasso$lambda.1se
+best.lambda_lasso
+
+#picking lambda ridge (by min MSE)
+cv.ridge = cv.glmnet(x = as.matrix(train[, -1]), 
+                     y = train[, 1], 
+                     alpha = 0,  # ridge
+                     family = "gaussian")
+
+plot(cv.ridge)
+best.lambda_ridge = cv.ridge$lambda.min
+best.lambda_ridge
+```
+
+如下圖所示
+
+在lasso模型中，我們挑選最佳的lambda為一個標準差內的最大λ(λ=0.005040327) 。因為一個標準差內的最大λ 的MSE 與最低MSE 相差很少，因此我們選擇一個標準差內的最大λ以減少過度配適(overfit)問題
+
+對於ridge模型來說，我們挑選最佳的lambda為MSE 最低的λ(λ=0.01729069)，使用一個標準差內的最大λ並不會減少大量變數的係數
+
+```{r warning=FALSE}
+best.lambda_ridge = cv.ridge$lambda.min
+best.lambda_ridge
+par(mfcol = c(1, 2))
+plot(lasso, xvar='lambda', main="Lasso")
+abline(v=log(best.lambda_lasso), col="blue", lty=5.5 )
+plot(ridge, xvar='lambda', main="Ridge")
+abline(v=log(best.lambda_ridge), col="blue", lty=5.5 )
+```
+
+我們把得到的lambda代回lasso模型和ridge中
+
+=\> 沒有變數被剔除，但是當我們細看其中的lasso模型保留下來的係數，其模型的係數已並非原本的回歸模型係數，是已經經過lambda的優化的係數。
+
+```{r warning=FALSE}
+coef(cv.lasso, s = "lambda.1se")
+select.ind_lasso <-  which(abs(coef(cv.lasso, s = "lambda.1se")) !=0)
+select.ind_lasso <-  select.ind_lasso[-1]  # ignore interval
+```
+
+```{r class.source = 'fold-show', warning=FALSE}
+select.varialbes_lasso = colnames(train)[select.ind_lasso]
+select.varialbes_lasso
+```
+
+#### **Step3：評估模型的成效**
+
+```{r warning=FALSE}
+#evaluate
+ridge.test = predict(ridge, 
+                     s = best.lambda_ridge, 
+                     newx = as.matrix(test[, -1]))
+SSE_ridge <- mean((exp(test$log_vix_adj_close) - exp(ridge.test))^2)
+SST <- mean((exp(test$log_vix_adj_close) - exp(mean(test$log_vix_adj_close)))^2)
+R_square_ridge <- 1 - SSE_ridge/SST
+cat('Ridge R square',R_square_ridge)
+
+lasso.test = predict(lasso, 
+                     s = best.lambda_lasso, 
+                     newx = as.matrix(test[, -1]))
+SSE_lasso <- mean((exp(test$log_vix_adj_close) - exp(lasso.test))^2)
+SST <- mean((exp(test$log_vix_adj_close) - exp(mean(test$log_vix_adj_close)))^2)
+R_square_lasso <- 1 - SSE_lasso/SST
+cat('Lasso R square',R_square_lasso)
+```
+
+Lasso模型R平方為0.7737381
+
+Ridge模型R平方為0.6973436
+
+### ***分析二 \< 加入中國新冠肺炎資料 \>*** {.tabset .tabset-pills}
+
+因為中國為美國進口大國，也就是重要供應鏈的一環，所以我們將加入中國新冠肺炎資料以提升模型準確度，其手法與上方相同
+
+#### **Step1：整理資料**
+
+```{r warning=FALSE}
+china_summary_data <- target_contry(data = world_summary, place = 'China')
+china_summary_data <- china_summary_data %>% mutate(log_vix_adj_close = log(vix$Adj.Close),
+                                                    .before= "location")
+china_covid_variable <- china_summary_data %>% select(where(~is.numeric(.x)))
+china_usa_covid_variable <- america_covid_variable %>% mutate(china_new_cases_smoothed = china_covid_variable$new_cases_smoothed,
+                                                              china_new_deaths_smoothed = china_covid_variable$new_deaths_smoothed,
+                                                              china_reproduction_rate = china_covid_variable$reproduction_rate,
+                                                              china_new_tests_smoothed = china_covid_variable$new_tests_smoothed,
+                                                              china_positive_rate = china_covid_variable$positive_rate,
+                                                              china_tests_per_case = china_covid_variable$tests_per_case,
+                                                              china_people_vaccinated = china_covid_variable$people_vaccinated,
+                                                              china_people_fully_vaccinated = china_covid_variable$people_fully_vaccinated,
+                                                              china_new_vaccinations_smoothed = china_covid_variable$new_vaccinations_smoothed,
+                                                              china_stringency_index = china_covid_variable$stringency_index,
+                                                              china_death_rate = china_covid_variable$death_rate
+                                                          )
+```
+
+#### **Step2：Tuning**
+
+```{r warning=FALSE}
+suppressMessages(library(glmnet))
+
+set.seed(22)
+train.index = sample(x=1:nrow(china_usa_covid_variable),
+                     size=ceiling(0.8*nrow(china_usa_covid_variable)))
+
+train = china_usa_covid_variable[train.index, ]
+test = china_usa_covid_variable[-train.index, ]
+
+ridge = glmnet(x = as.matrix(train[, -1]), 
+               y = train[, 1], 
+               alpha = 0,
+               family = "gaussian")
+
+lasso = glmnet(x = as.matrix(train[, -1]), 
+               y = train[, 1], 
+               alpha = 1,
+               family = "gaussian")
+
+par(mfcol = c(1, 2))
+plot(lasso, xvar='lambda', main="Lasso")
+plot(ridge, xvar='lambda', main="Ridge")
+
+#picking lambda lasso (by min MSE)
+cv.lasso = cv.glmnet(x = as.matrix(train[, -1]), 
+                     y = train[, 1], 
+                     alpha = 1,  # lasso
+                     family = "gaussian")
+
+best.lambda_lasso = cv.lasso$lambda.1se
+best.lambda_lasso
+
+#picking lambda ridge (by min MSE)
+cv.ridge = cv.glmnet(x = as.matrix(train[, -1]), 
+                     y = train[, 1], 
+                     alpha = 0,  # ridge
+                     family = "gaussian")
+
+best.lambda_ridge = cv.ridge$lambda.1se
+best.lambda_ridge
+
+par(mfcol = c(1, 2))
+plot(cv.lasso)
+plot(cv.ridge)
+```
+
+在lasso模型中，我們挑選最佳的lambda為一個標準差內的最大λ(λ=0.004592558) 因為一個標準差內的最大λ的MSE與最低MSE相差很少，因此我們選擇一個標準差內的最大λ以減少過度配適(overfit)問題
+
+在lasso模型中，我們挑選最佳的lambda為一個標準差內的最大λ(λ=0.05795151)，而原因與lasso模型相同
+
+```{r warning=FALSE}
+par(mfcol = c(1, 2))
+plot(lasso, xvar='lambda', main="Lasso")
+abline(v=log(best.lambda_lasso), col="blue", lty=5.5 )
+plot(ridge, xvar='lambda', main="Ridge")
+abline(v=log(best.lambda_ridge), col="blue", lty=5.5 )
+```
+
+我們來看我們挑選出的變數剩下那些，而係數又為多少？
+
+```{r warning=FALSE}
+coef(cv.lasso, s = "lambda.1se")
+select.ind_lasso <-  which(abs(coef(cv.lasso, s = "lambda.1se")) != 0)
+select.ind_lasso <-  select.ind_lasso[-1]  # ignore interval
+```
+
+```{r class.source = 'fold-show', warning=FALSE}
+select.varialbes_lasso = colnames(train)[select.ind_lasso]
+select.varialbes_lasso
+```
+
+由此可知在挑選出來的18個預測美股恐慌程度的變數中[只有8個變數在美國本土發生]{.underline}，因此可推知：
+
+##### **中國新冠肺炎的政策(工廠停工...)和數據(死亡率...)佔了超過一半的變數**
+
+##### **=\> 中國疫情嚴重程度對於美國股市具極大影響力。**
+
+#### **Step3：評估模型的成效**
+
+```{r warning=FALSE}
+#evaluate
+ridge.test = predict(ridge, 
+                     s = best.lambda_ridge, 
+                     newx = as.matrix(test[, -1]))
+SSE_ridge <- mean((exp(test$log_vix_adj_close) - exp(ridge.test))^2)
+SST <- mean((exp(test$log_vix_adj_close) - exp(mean(test$log_vix_adj_close)))^2)
+R_square_ridge <- 1 - SSE_ridge/SST
+cat('Ridge R square',R_square_ridge)
+
+lasso.test = predict(lasso, 
+                     s = best.lambda_lasso, 
+                     newx = as.matrix(test[, -1]))
+SSE_lasso <- mean((exp(test$log_vix_adj_close) - exp(lasso.test))^2)
+SST <- mean((exp(test$log_vix_adj_close) - exp(mean(test$log_vix_adj_close)))^2)
+R_square_lasso <- 1 - SSE_lasso/SST
+cat('Lasso R square',R_square_lasso)
+```
+
+Lasso模型R平方為0.8048402
+
+Ridge模型R平方為0.7645679
+
+## **3.3.2 主成分分析(PCA)**
+
+由於進行預測時 Lasso 和 Ridge 並不會感測到變數多重共線性，因為多重共線性問題並不會影響到模型的準確度，因此挑選出的變數有相當嚴重的**多重共線性**問題，導致所顯示的回歸係數沒有參考價值，但我們仍然想知道哪個變數會影響 VIX 最嚴重，因此我們使用主成分分析解決這個問題。
+
+此部份我們同樣進行兩組分析，分析步驟皆相同，兩組分別如下：
+
+1.  只考慮美國國內單獨進行分析
+2.  將中國納入變因中一起進行分析
+
+### ***分析一 \< 美國資料與國際政策 \>*** {.tabset .tabset-pills}
+
+#### **Step1：整理資料**
+
+讀取資料並將資料標準化後刪除NA資料
+
+```{r warning=FALSE}
+world_summ <- read.csv("world_summary_cleaned.csv")
+raw_vix <- read.csv("vix.csv")
+suppressMessages(library("psych"))
+suppressMessages(library("car"))
+america_summary_data <- subset(world_summ,world_summ$location == 'United States')
+usa_std <- scale(america_summary_data[4:24])
+usa_std <- subset(usa_std[,-c(19,20)])
+colnames(usa_std) <- c("total_cases_usa",	"new_cases_usa", "new_cases_smoothed_usa", "total_deaths_usa", 
+                        "new_deaths_usa",	"new_deaths_smoothed_usa", "reproduction_rate_usa",	
+                        "total_tests_usa", "new_tests_usa", "new_tests_smoothed_usa",	"positive_rate_usa",
+                        "tests_per_case_usa",	"total_vaccinations_usa",	"people_vaccinated_usa",	
+                        "people_fully_vaccinated_usa", "new_vaccinations_usa","new_vaccinations_smoothed_usa",
+                        "stringency_index_usa",	"death_rate_usa")
+usa_dummy <- america_summary_data[25:28]
+usa <- data.frame(cbind(usa_std, usa_dummy))
+vix_std <- scale(raw_vix[2:7])
+```
+
+#### **Step 2：計算VIF值**
+
+VIF \>10，確認資料有線性回歸問題，因此以主成分分析替代
+
+```{r warning=FALSE}
+regr_usa <- lm(data = data.frame(cbind(vix_std,usa_std, usa_dummy)), 
+               Adj.Close ~ new_cases_smoothed_usa + new_tests_smoothed_usa + new_deaths_smoothed_usa + 
+                 tests_per_case_usa + new_tests_smoothed_usa + positive_rate_usa + reproduction_rate_usa + 
+                 people_vaccinated_usa + new_vaccinations_smoothed_usa + stringency_index_usa + 
+                 death_rate_usa + factor(new_york_lockdown) + factor(California_lockdown) + 
+                 factor(China_factory_shutdown)+factor(federal_rate_cut))
+```
+
+```{r class.source = 'fold-show', warning=FALSE}
+vif(regr_usa)
+```
+
+#### **Step 3：主成分分析(PCA)**
+
+使用主成分分析(PCA)代替新冠肺炎相關變數中有線性回歸問題的資料
+
+```{r warning=FALSE}
+usa_var <- cbind(usa_std[,c("new_cases_smoothed_usa", "new_tests_smoothed_usa", "new_deaths_smoothed_usa","tests_per_case_usa", 
+                            "new_tests_smoothed_usa", "positive_rate_usa", "reproduction_rate_usa", "people_vaccinated_usa", 
+                            "new_vaccinations_smoothed_usa", "stringency_index_usa","death_rate_usa")]
+                 , usa_dummy[,c("new_york_lockdown", "California_lockdown", "China_factory_shutdown", "federal_rate_cut")])
+usa_eigen <- eigen(cor(usa_var))
+pc <- usa_eigen$values/sum(usa_eigen$values)
+names(pc) <- c("pc1","pc2","pc3","pc4","pc5","pc6","pc7","pc8","pc9","pc10","pc11","pc12")
+pc
+eigenvalues_usa <- eigen(cor(usa_var))$values
+
+screeplot(prcomp(usa_var, scale. = TRUE), type = "lines")
+usa_pca <- prcomp(usa_var, scale. = TRUE)
+summary(usa_pca)
+
+```
+
+透過 Cumulative Proportion 我們可以知道，如果我們取PC1\~PC5，將可以約解釋82%進行PCA主成分前回歸的變異。
+
+```{r}
+usa$pc1 <- usa_pca$x[,1]
+usa$pc2 <- usa_pca$x[,2]
+usa$pc3 <- usa_pca$x[,3]
+usa$pc4 <- usa_pca$x[,4]
+usa$pc5 <- usa_pca$x[,5]
+```
+
+```{r warning=FALSE}
+noise_ev <- function(n, p) {
+  noise <- data.frame(replicate(p, rnorm(n)))
+  return(eigen(cor(noise))$values)
+}
+evalues_noise <- replicate(100, noise_ev(33,13))
+evalues_mean <- apply(evalues_noise, 1, mean)
+```
+
+```{r class.source = 'fold-show', warning=FALSE}
+screeplot(usa_pca, type = "lines", col = "coral3")
+lines(evalues_mean, type = "b", col = "blue")
+abline(h = 1, lty = 2)
+legend(4,4,c("True eigenvalues","simulated engenvalues","eigenvalue = 1"),lty=c(1,1,2),col=c("coral3","blue","black"))
+```
+
+加入Noise後，從圖片結果及eigen value值(我們挑選eigen value大於1 的值)，我們保留了PC1\~PC5。
+
+```{r class.source = 'fold-show', warning=FALSE}
+regr_usa_pca <- lm(data = data.frame(cbind(vix_std,usa)), Adj.Close ~ pc1 + pc2 + pc3 + pc4 + pc5)
+summary(regr_usa_pca)
+```
+
+由PCA的迴歸分析中，R-squared結果可知，解釋能力約為0.57
+
+#### **Step 4：Axis Rotation 深入分析**
+
+透過step3 我們已經可以得到一個完全不會有多重共線性的資料(orthogonal)，但是這些變數的 實質涵義我們並不知道，因此我們使用 Axis Rotation 推論各個主成分(PC)分別代表新冠肺炎數據的哪個面向(0.8 我們就視此變數與此主成分相關)
+
+```{r class.source = 'fold-show', warning=FALSE}
+usa_pca_rot <- principal(r=usa_var, nfactors =5, rotate="varimax",scores=TRUE)
+```
+
+```{r warning=FALSE}
+usa_pca_rot
+```
+
+[**RC1: 確診數**]{.underline}
+
+**new cases smoothed, positive rate**
+
+=\> 陽性率增加表示新增確診個案數量增加，兩者為同步增加關係，因此檢測結果也符合實際情況，兩者可視為同一件事，相關性高。
+
+[**RC2: 封城政策**]{.underline}
+
+**New York lockdown, Califoornia lockdown**
+
+=\> 紐約及加州封城同屬於某行政區政策上改變，且皆為"封鎖"，造成的影響雷同，因此相關性極高，可視為幾乎同一變因。
+
+[**RC3: 針對疫情發佈之政令**]{.underline}
+
+**stringency rate, federal rate cut**
+
+=\> 若新冠疫情愈嚴重，政府通常會採取更加嚴格的政策及更嚴謹的控管，因此stringency index的變動幅度會愈大，而聯準會也會採取降息政策，以避免金融環境緊縮，影響到經濟活動，因此federal rat cut的變動程度也會增加。由上述可知，兩者在面對疫情變化時的改變同趨勢，因此可歸納為同一變因。
+
+[**RC4: 接種疫苗人數**]{.underline}
+
+**the number of vaccinated people**
+
+=\> 接種疫苗人數是唯一占比高出許多的變數，由於接種疫苗人數是累積數量，只會增加不會減少，且疫苗接種人數增加，代表民眾願意施打疫苗的平郡意願提高，推論是因疫情加造成此變化。
+
+[**RC5: 傳染率**]{.underline}
+
+**reproduction rate**
+
+=\> 直觀地思考，傳染率愈高，可能新增的案例就愈多，確診比例也會隨之提高，必定會影響民眾的心情，擔心自己也成為下一位確診者，可推論其與恐慌程度關聯性高。
+
+### ***分析二 \< 加入中國新冠肺炎資料 \>*** {.tabset .tabset-pills}
+
+#### **Step 1：篩選出所需資料**
+
+```{r warning=FALSE}
+china_summary_data <- subset(world_summ,world_summ$location == 'China')
+china_std <- scale(china_summary_data[4:24])
+china_std <- subset(china_std[,-c(19,20)])
+```
+
+#### **Step 2：計算VIF值**
+
+VIF \>10，確認資料有線性回歸問題，因此以主成分分析替代
+
+```{r warning=FALSE}
+regr_usa_and_china <- lm(data = data.frame(cbind(vix_std, usa_std, usa_dummy, china_std)), 
+                      Adj.Close ~ new_cases_smoothed_usa + new_tests_smoothed_usa + new_deaths_smoothed_usa + 
+                        tests_per_case_usa + new_tests_smoothed_usa + positive_rate_usa + reproduction_rate_usa + 
+                        people_vaccinated_usa + new_vaccinations_smoothed_usa + stringency_index_usa + death_rate_usa + 
+                        factor(new_york_lockdown) + factor(California_lockdown) + factor(China_factory_shutdown) + 
+                        factor(federal_rate_cut) + new_cases_smoothed + new_tests_smoothed + new_deaths_smoothed + 
+                        tests_per_case + new_tests_smoothed + positive_rate + reproduction_rate + people_vaccinated + 
+                        new_vaccinations_smoothed + stringency_index + death_rate)
+```
+
+```{r class.source = 'fold-show', warning=FALSE}
+vif(regr_usa_and_china)
+```
+
+#### **Step 3：主成分分析(PCA)**
+
+使用主成分分析(PCA)代替新冠肺炎相關變數中有線性回歸問題的資料
+
+```{r warning=FALSE}
+usa_and_china_var <- cbind(usa_std[,c("new_cases_smoothed_usa", "new_tests_smoothed_usa", "new_deaths_smoothed_usa",
+                                       "tests_per_case_usa", "new_tests_smoothed_usa", "positive_rate_usa",     
+                                      "reproduction_rate_usa", "people_vaccinated_usa", "new_vaccinations_smoothed_usa", 
+                                      "stringency_index_usa", "death_rate_usa")], 
+                            usa_dummy[,c("new_york_lockdown", "California_lockdown", "China_factory_shutdown", "federal_rate_cut")],
+                            china_std[,c("new_cases_smoothed", "new_tests_smoothed", "new_deaths_smoothed"
+                                       ,"tests_per_case", "new_tests_smoothed", "positive_rate", "reproduction_rate"
+                                       , "people_vaccinated", "new_vaccinations_smoothed", "stringency_index", "death_rate")])
+usa_and_china_eigen <- eigen(cor(usa_and_china_var))
+pc_usa_and_china <- usa_and_china_eigen$values/sum(usa_and_china_eigen$values)
+names(pc_usa_and_china) <- c("pc1","pc2","pc3","pc4","pc5","pc6","pc7","pc8","pc9","pc10","pc11","pc12")
+pc_usa_and_china
+
+screeplot(prcomp(usa_and_china_var, scale. = TRUE), type = "lines")
+usa_and_china_pca <- prcomp(usa_and_china_var, scale. = TRUE)
+summary(usa_and_china_pca)
+
+usa_and_china <- data.frame(cbind(usa, china_std))
+usa_and_china$pc1 <- usa_and_china_pca$x[,1]
+usa_and_china$pc2 <- usa_and_china_pca$x[,2]
+usa_and_china$pc3 <- usa_and_china_pca$x[,3]
+usa_and_china$pc4 <- usa_and_china_pca$x[,4]
+usa_and_china$pc5 <- usa_and_china_pca$x[,5]
+usa_and_china$pc6 <- usa_and_china_pca$x[,6]
+usa_and_china$pc7 <- usa_and_china_pca$x[,7]
+```
+
+```{r}
+usa_and_china_evalues_noise <- replicate(100, noise_ev(33,13))
+usa_and_china_evalues_mean <- apply(usa_and_china_evalues_noise, 1, mean)
+```
+
+```{r class.source = 'fold-show', warning=FALSE}
+screeplot(usa_and_china_pca, type = "lines", col = "coral3")
+lines(usa_and_china_evalues_mean, type = "b", col = "blue")
+abline(h = 1, lty = 2)
+legend(4,6,c("True eigenvalues","simulated engenvalues","eigenvalue = 1"),lty=c(1,1,2),col=c("coral3","blue","black"))
+```
+
+加入Noise後，從圖片結果及eigen value值(我們挑選eigen value大於1 的值)，我們保留了PC1\~PC7，約可解釋**79%**進行PCA主成分前回歸的變異，其中將近2成是中國所造成的影響
+
+```{r class.source = 'fold-show', warning=FALSE}
+regr_usa_and_china_pca <- lm(data = data.frame(cbind(vix_std,usa_and_china)), Adj.Close ~ pc1 + pc2 + pc3 + pc4 + pc5 + pc6 + pc7)
+summary(regr_usa_and_china_pca)
+```
+
+由PCA的迴歸分析中，R-squared 結果可知，解釋能力約為 0.57
+
+#### **Step 4：Axis Rotation 深入分析**
+
+透過step3 我們已經可以得到一個完全不會有多重共線性的資料(orthogonal)，但是這些變數的 實質涵義我們並不知道，因此我們使用 Axis Rotation 推論各個主成分(PC)分別代表新冠肺炎數據的哪個面向(0.8 我們就視此變數與此主成分相關)
+
+```{r class.source = 'fold-show', warning=FALSE}
+usa_and_china_pca_rot <- principal(r=usa_and_china_var, nfactors =7, rotate="varimax",scores=TRUE)
+```
+
+```{r warning=FALSE}
+usa_and_china_pca_rot
+```
+
+[**RC1: 封城政策**]{.underline}
+
+**New York lockdown, California lockdown**
+
+=\> 佔比最高(\>80%)且比例非常相近的兩項變數皆為行政區的封城政策，如上一組分析中RC2的解釋所述，相同政策造成的影響也會雷同，可視為同一組變因。
+
+[**RC2: 中國受疫情之影響**]{.underline}
+
+**death rate(China), new cases smoothed(China), China factory shutdown**
+
+=\> 這組佔比較高的變因皆與中國有關，新增案例數量為最高，可推論因確診數增加，代表疫情加劇，死亡率有相當高之機率隨之提升，而受疫情嚴重影響，中國政府開始有工廠停工的政策。這也能進一步解釋中國的經濟變因對於美國而言是非常具影響力的，程度甚至可超越美國本身。
+
+[**RC3: 美國確診數**]{.underline}
+
+**new cases smoothed(USA), positive rate(USA)**
+
+=\> 如上一組分析中RC1所述，陽性率增加表示新增確診個案數量增加，兩者為同步增加關係，且皆為美國國內的數據，因此可視為同一變因。
+
+[**RC4: 因應疫情採取之政策**]{.underline}
+
+**federal rate cut, stringency index(USA), new deaths smoothed(China)**
+
+=\> 如上一組分析中RC4所述，若新冠疫情愈嚴重，政府通常會採取更加嚴格的政策及更嚴謹的控管，因此stringency index的變動幅度會愈大，此處多了中國的新增死亡率，此因素必定會影響美國的經濟，因此考慮中國帶來的波動後，聯準會更有可能採取降息政策，以避免金融環境緊縮，影響到經濟活動，因此federal rate cut的變動程度也會增加。
+
+[**RC5: 中國的接種疫苗數**]{.underline}
+
+**people's vaccinations smoothed(China)**
+
+=\> 中國的接種疫苗人數是唯一占比高出許多的變數，第二高為美國本土的接種疫苗人數，加入中國的變數後，發現在疫苗部分，中國的影響比美國更大，但兩者皆為疫苗接種人數，可知與疫苗接種人數相關。
+
+[**RC6: 中國疫情控管嚴格程度**]{.underline}
+
+**stringency index(China)**
+
+=\> 與上一分析類似，若新冠疫情愈嚴重，政府通常會採取更加嚴格的政策及更嚴謹的控管，因此stringency index的變動幅度會愈大，而加入中國一起進行回歸分析後，中國的控管嚴格度同樣也具一定影響力，略少於美國本土(RC4)一點。
+
+[**RC7: 美國傳染率**]{.underline}
+
+**reproduction rate(USA)**
+
+=\> 直觀地思考，傳染率愈高，可能新增的案例就愈多，確診比例也會隨之提高，必定會影響民眾的心情，造成人心惶惶，而相較於中國的傳染率，美國本土的傳染率對於自己國家的影響度必定高出許多，因此也是唯一佔比較高的變因。
+
+加入中國為變因後，我們發現與中國相關的因素在RC1\~RC7中，佔了超過一半的比例，因此可檢測如lasso模型預測之結果：
+
+##### **中國疫情嚴重程度對於美國股市具極大影響力**
+
+## **肆、結論**
+
+**分析總結**
+
+**中國對於美國股市的影響有明顯的影響**
+
+-   \<預測\>
+
+    在預測的18個變數中有10個變數與中國相關，表示中國的變數在預測上佔有相當程度地位
+
+    **R-squared ≈ 0.8**，表現良好，我們確實可以透過 COVID 的資料來預測美國股市恐慌程度
+
+-   \<分析影響變數(主成分分析)\>
+
+    主成分分析中，中國也佔有 25% 的解釋變數，影響最嚴重的變數是美國的封城政策佔有30%的解釋變數，美國確診數佔有12%的解釋變數，因此可以得知影響美國股市恐慌程度大致為美國的封城政策，中國疫情程度，美國確診數。
+
+**延伸分析**
+
+可使用此方法增加更多國家或地區的資料，進一步分析不同國家對於美國股市恐慌程度的影響 E.g. 加入歐盟資料，判斷主要出口國是否會影響美國股市恐慌程度
+
+## **伍、問題回答** {.tabset .tabset-pills}
+
+### **Q1 主題發想**
+
+**Where do you get your project ideas?**
+
+因為之前接受到許多關於 COVID 股災的新聞，當時報導提出的原因有許多，而我好奇媒體提出的原因是否能用數據的方式驗證而各個原因所影響美股的程度又是何者最高，如果知道了這些變數，那我們是否可以透過這些變數預測美股市場恐慌程度。
+
+在鍾老師的衍定課程中學習到關於 VIX 的知識，有了可以量化市場對於股市恐慌程度的指標，因此想用在金融大數據所學的技能找尋各國 COVID 對於美國股市的影響。
+
+### **Q2 使用哪些R技術？**
+
+**What R techniques have been used?**
+
+首先我們先做資料前處理，將會破壞模型的變數刪除或修正
+
+-   \<預測\>
+
+    我們對 Lasso 和 Ridge 模型做Tuning -\> 找出最適合 Lambda -\> 再加入他國資料進入模型-\> 最後評估模型成效。
+
+-   \<分析影響變數(主成分分析)\>
+
+    我們先確認 COVID 資料有多重共線性問題 -\> 用 eigen value 的方式挑選出要保留幾個主成分(PC) -\> 再使用RC法找出各個主成分所代表的意涵 -\> 最後進行PCA的回歸模型，評估模型成效。
+
+### **Q3 使用哪些新的套件及函數？**
+
+**How many new packages and functions are used?**
+
+-   Package:
+
+    tidyverse, glmnet (Lasso & Ridge 模型), car (計算 VIF 以確認變數是否有多重共線性問題 ), rio (輸出資料), ggplot2 , patchwork, psych (主成分分析)
+
+-   Function:
+
+    filter(), transmute(), as_tibble(), mutate(,.before), glmnet(), cv.glmnet() (Tuning Lasso & Ridge 模型), which(), predict(), vif(), eigen(), prcomp(), screenplot(), principal()
+
+### **Q4 最困難的部分**
+
+**What is the most difficult part of your analysis?**
+
+一開始的模型成效很低，因此開始從資料找起問題原因，後來發現跟非定態有關，且非定態也會影響主成分分析每個組成分所代表的意涵，因此我們認為最困難的點是處理一開始所得的一個國家64個變數，到底哪些變數會傷害模型，而會傷害模型的變數該如何去修正。
