@@ -1,3 +1,4 @@
+English version underneath
 # 新冠疫情下投資人的恐慌指標分析 (VIX)
 本專案旨在探討 COVID-19 疫情期間，全球金融市場上反映投資人恐慌程度的波動率指數（VIX）的變化趨勢，並分析疫情與 VIX 之間的關聯性。研究透過視覺化圖表與機器學習模型，提供疫情對市場情緒影響的量化觀察與預測能力驗證。
 
@@ -52,3 +53,60 @@ Melkumova, L. E. & Shatskikh, S. Ya. (2017). Comparing Ridge and LASSO estimator
 楊致遠 Chih-Yuan Yang
 
 林羽霈 Yu-Pei Lin
+
+****
+
+# Analysis of Investor Panic Index (VIX) During the COVID-19 Pandemic
+This project explores the trend of the Volatility Index (VIX), which reflects investor panic in global financial markets during the COVID-19 pandemic. The study investigates the correlation between pandemic-related developments and fluctuations in VIX. Through visual analytics and machine learning models, this research provides a quantitative examination of the impact of the pandemic on market sentiment and validates the predictive power of COVID-19 data on investor behavior.
+
+## Project Background
+Motivation: The COVID-19 pandemic severely impacted the global economy and financial markets. As a key indicator of market fear, the VIX is central to this research, which aims to determine whether its fluctuations align with the release of pandemic-related information and whether it holds predictive value.
+
+Objective: To analyze how the release of pandemic-related news influenced the VIX, especially surrounding key events such as the WHO's declaration of a global pandemic.
+
+## Research Highlights
+Combined use of statistical analysis and machine learning techniques to validate the impact of the pandemic on investor sentiment.
+
+Applied Lasso and Ridge Regression models to predict VIX levels while addressing feature selection and overfitting concerns.
+
+Used Principal Component Analysis (PCA) to perform dimensionality reduction, extracting key variables and uncovering latent explanatory factors.
+
+## Machine Learning Applications
+### Comparison of Lasso and Ridge Regression Models
+1. Applied Lasso and Ridge Regression to analyze the predictive power of COVID-19 data on VIX.
+
+2. Compared the two models' effectiveness in handling overfitting under our dataset and context.
+
+3. Evaluated model interpretability and robustness to determine the better fit for our prediction task.
+
+### Principal Component Analysis (PCA)
+1. Performed dimensionality reduction on high-dimensional COVID-19 data (e.g., new cases, death counts, vaccination rates).
+
+2. Extracted representative principal components.
+
+3. Investigated the latent relationships between these key features and VIX.
+
+4. Explored how multiple pandemic indicators jointly influence investor sentiment.
+
+## Analytical Methods and Techniques
+### Traditional Statistical and Visual Analysis
+1. Used daily VIX index data to create time-series visualizations.
+
+2. Annotated significant COVID-19 news events on the timeline to examine corresponding VIX fluctuations.
+
+3. Summarized the trend differences in VIX levels between the early and later stages of the pandemic.
+
+## View Full Report and Results
+To view the full experimental results and report with all visualizations, open the file
+楊致遠__林羽霈_新冠疫情下投資人的恐慌指標(VIX).html
+in Google Chrome or any modern web browser.
+
+## References
+Andrzej, M. & Waldemar, R. (1993). Principal Components Analysis (PCA). Journal of Computers & Geosciences, Vol. 19 (March), pp. 303–342.
+
+Melkumova, L. E. & Shatskikh, S. Ya. (2017). Comparing Ridge and LASSO Estimators for Data Analysis. Procedia Engineering, Vol. 201, pp. 746–755.
+
+## Authors
+Chih-Yuan Yang
+
+Yu-Pei Lin
