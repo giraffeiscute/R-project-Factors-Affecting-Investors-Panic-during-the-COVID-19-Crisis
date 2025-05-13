@@ -40,7 +40,7 @@ PCA 提供降維分析結果，協助萃取重要變數與潛在解釋因子
 整理疫情初期與後期 VIX 水準變化趨勢
 
 ## 觀看完整報告與實驗結果
-使用google或任意瀏覽器開啟檔案 楊致遠__林羽霈_新冠疫情下投資人的恐慌指標(VIX).html
+使用google或任意瀏覽器開啟檔案 楊致遠__林羽霈_新冠疫情下投資人的恐慌指標(VIX).html 即可觀看完整實驗結果圖以及實驗報告
 
 
 ## 研究亮點
@@ -50,16 +50,12 @@ Lasso 與 Ridge regression 模型提供預測角度，並考慮特徵選擇與�
 
 PCA 提供降維分析結果，協助萃取重要變數與潛在解釋因子
 
-📚 參考資料
-CBOE Volatility Index (VIX)
+## 參考資料
+Andrzej, M. & Waldemar, R. (1993). Principal components analysis (PCA). Journal of Computers & Geosciences, Vol. 19, (March), pp. 303-342.
+Melkumova, L. E. & Shatskikh, S. Ya. (2017). Comparing Ridge and LASSO estimators for data analysis. Journal of Procedia Engineering, Vol. 201, pp. 746-755
 
-Our World in Data: COVID-19 資料集
 
-WHO 疫情事件發布紀錄
-
-金融市場相關新聞與專論
-
-👥 作者
+## 作者
 楊致遠 Chih-Yuan Yang
 
 林羽霈 Yu-Pei Lin
